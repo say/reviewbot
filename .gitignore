@@ -1,2 +1,4 @@
 .env
 .idea
+sample_response.json
+*.DS_Store
