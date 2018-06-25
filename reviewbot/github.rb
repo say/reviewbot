@@ -34,6 +34,10 @@ module ReviewBot
       raise "Missing ENV[\"LABEL_REPOSITORIES\"]" unless label_repositories
     end
 
+    def pull_request(repository, number)
+      return pull_request = client.pull_request(repository, number)
+    end
+
     def reviewable_pull_requests(github_user: nil, repositories:, labels:)
       repositories = repositories.map do |repository|
         if repository.include?("/")
