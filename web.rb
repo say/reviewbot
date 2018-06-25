@@ -10,13 +10,22 @@ module ReviewBot
       puts "Running"
     end
 
+    get "/test" do
+      file = File.read('sample_response.json')
+      body = JSON.parse(file)
+
+      controller = WebhookController.new
+      controller.handle_webhook_body(body) 
+      true
+    end
+
     post "/pullrequest" do
       body = JSON.parse(request.body.read)
-
-      print("Received pull request webhook")
+      # puts body.to_json
+      puts "Received pull request webhook"
       controller = WebhookController.new
 
-      print("Passing webhook body to WebhookController")
+      puts "Passing webhook body to WebhookController"
       controller.handle_webhook_body(body)
 
     end

@@ -13,14 +13,18 @@ module ReviewBot
         config.token = ENV['SLACK_API_TOKEN']
       end
 
-      print("Initializing a WebhookController...")
+      puts "Initializing a WebhookController..."
       @slack = Slack::Web::Client.new
-      print("Slack client initialized! 🚀")
+      puts "Slack client initialized! 🚀"
     end
 
     def handle_webhook_body(body)
+        ignored_actions = ["unlabeled"]
+
         action = body['action']
         number = body['number']
+
+        return nil if ignored_actions.include? action
   
         # Pull Request
         pull_request = body['pull_request']
@@ -30,7 +34,8 @@ module ReviewBot
         # Maps assignee/reviewers to just their github handle
         assignees = pull_request['assignees'].map { |assignee| assignee['login'] }
         reviewers = pull_request['requested_reviewers'].map { |reviewer| reviewer['login'] }
-        
+        color = pull_request['state'] == 'open' ? "#03b70b" : "#ff0000"
+
         # Maps labels to just the text value
         labels = pull_request['labels'].map { |label| label['name'] }
   
@@ -38,83 +43,59 @@ module ReviewBot
         repo = pull_request['head']['repo']
         repo_name = repo['name']
         repo_full_name = repo['full_name']
-  
+
         # Map github handles => User model objects
         assignee_users = assignees.map { |user| User.find_by(github_user: user) }.compact
-        reviewer_users = reviewers.map { |user| User.find_by(github_user: user) }.compact
-  
-        puts "Found #{assignee_users.count} assignees, #{reviewer_users.count} reviewers"
-  
+        reviewer_users = (reviewers - assignees).map { |user| User.find_by(github_user: user) }.compact
 
-        # TODO: Dry this 😬
-        assignee_users.each { |user|
-          puts "Checking if @#{user.slack_user} should be updated"
-          slack_username = "@" + user.slack_user
+        formatted_pr = "##{number} - #{title}:\n#{url}"
+        assignees = check_if_updates_needed(assignee_users, labels, repo_name, repo_full_name)
+        puts "Assignees: #{assignees}"
 
-          # Check if we are subscribed to this label
-          break if (user.labels & labels).empty?
-          
-          # Check if we are subscribed to this repo (case insensitive)
-          user_repos = user.repositories.map(&:downcase)
-          break if !(user_repos.include? repo_name.downcase or user_repos.include? repo_full_name.downcase)
-  
-          puts "[#{slack_username}]: Sending message because of #{user.labels & labels} label(s)"
+        assignees.each { |user|
+          send_message(user.slack_user, number, title, url, formatted_pr, color, action)
+        } if assignees
+ 
+        puts "Reviewers: #{reviewers}"
+        reviewers = check_if_updates_needed(reviewer_users, labels, repo_name, repo_full_name)
+        reviewers.each { |user|
+          send_message(user.slack_user, number, title, url, formatted_pr, color, action)
+        } if reviewers
+        nil
+    end
+    
+    private
 
-          status_color = pull_request['state'] == 'open' ? "#03b70b" : "#ff0000"
-          formatted_pr = "##{number} - #{title}:\n#{url}"
-          
-          @slack.chat_postMessage(
-            channel: slack_username,
-            text: "Update", 
-            attachments: [
-              {
-                thumb_url: "",
-                fallback: "Ready for Review Pull Requests:\n\n#{formatted_pr}",
-                title: "An assigned pull request was #{action}",
-                title_link: url,
-                text: formatted_pr,
-                color: status_color
-              }
-            ],
-            as_user: true)
-        }
+    def check_if_updates_needed(users, labels, repo, full_repo)
+      puts "Checking #{users} against #{repo} with #{labels}"
+      filtered = users.select do |user|
+        puts "Checking if @#{user.slack_user} should be updated"
+        # Check if we are subscribed to this repo (case insensitive)
+        user_repos = user.repositories.map(&:downcase)
+        (user.labels & labels) && (user_repos.include? repo.downcase or user_repos.include? full_repo.downcase)
+      end
+      puts "Filtered: #{filtered}"
 
+      return filtered
+    end
 
-        reviewer_users.each { |user|
-          puts "Checking if @#{user.slack_user} should be updated"
-          slack_username = "@" + user.slack_user
+    def send_message(slack_user, number, title, url, text, color, action)
+      puts "[#{slack_user}]: Sending message '#{text}' because of #{action}"
 
-          # Check if we are subscribed to this label
-          break if (user.labels & labels).empty?
-
-          # Don't send another message if we already sent one to an assignee
-          break if assignee_users.include? user
-          
-          # Check if we are subscribed to this repo (case insensitive)
-          user_repos = user.repositories.map(&:downcase)
-          break if !(user_repos.include? repo_name.downcase or user_repos.include? repo_full_name.downcase)
-  
-          puts "[#{slack_username}]: Sending message because of #{user.labels & labels} label(s)"
-
-          status_color = pull_request['state'] == 'open' ? "#03b70b" : "#ff0000"
-          formatted_pr = "##{number} - #{title}:\n#{url}"
-          
-          @slack.chat_postMessage(
-            channel: slack_username,
-            text: "Update", 
-            attachments: [
-              {
-                thumb_url: "",
-                fallback: "Ready for Review Pull Requests:\n\n#{formatted_pr}",
-                title: "A pull request that you are reviewing was #{action}",
-                title_link: url,
-                text: formatted_pr,
-                color: status_color
-              }
-            ],
-            as_user: true)
-        }
-   
+      @slack.chat_postMessage(
+        channel: "@" + slack_user,
+        text: "##{number} was just #{action}", 
+        attachments: [
+          {
+            thumb_url: "",
+            fallback: "Ready for Review Pull Requests:\n\n#{text}",
+            title: title,
+            title_link: url,
+            text: text,
+            color: color
+          }
+        ],
+        as_user: true)
     end
 
   end
