@@ -11,7 +11,7 @@ module ReviewBot
     end
 
     get "/test" do
-      file = File.read('sample_response.json')
+      file = File.read('sample_response2.json')
       body = JSON.parse(file)
 
       controller = WebhookController.new
